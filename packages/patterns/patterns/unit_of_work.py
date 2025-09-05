@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from contextlib import AbstractContextManager
+from contextlib import AbstractContextManager, AbstractAsyncContextManager
 from typing import Generator, Iterable, Tuple
 
 from .message import Event
@@ -36,7 +36,7 @@ class AbstractUnitOfWork(AbstractContextManager["AbstractUnitOfWork"]):
                     yield agg.events.pop(0)
 
 
-class AsyncAbstractUnitOfWork(AbstractContextManager["AsyncAbstractUnitOfWork"]):
+class AsyncAbstractUnitOfWork(AbstractAsyncContextManager["AsyncAbstractUnitOfWork"]):
     repositories: Tuple[AbstractRepository, ...] = ()
     
     async def __aenter__(self) -> "AsyncAbstractUnitOfWork":

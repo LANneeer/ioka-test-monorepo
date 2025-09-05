@@ -95,68 +95,110 @@ class AsyncMessageBus:
         *,
         uow: AsyncAbstractUnitOfWork,
         event_handlers: Mapping[Type[Event], Sequence[EventHandler]] | None = None,
-        command_handlers: Mapping[Type[Command], Sequence[CommandHandler]] | None = None,
+        command_handlers: Mapping[Type[Command], CommandHandler] | None = None,
         dependencies: Mapping[str, Any] | None = None,
         raise_on_error: bool = False
     ) -> None:
         self.uow = uow
-        self.event_handlers = {**{k: list(v) for k, v in (event_handlers or {}).items()}}
-        self.command_handlers = {**(command_handlers or {})}
-        self.dependencies = {"uow": self.uow, **(dependencies or {})}
+        self.event_handlers: Dict[Type[Event], List[EventHandler]] = {
+            **{k: list(v) for k, v in (event_handlers or {}).items()}
+        }
+        self.command_handlers: Dict[Type[Command], CommandHandler] = {
+            **(command_handlers or {})
+        }
+        self.dependencies: Dict[str, Any] = {"uow": self.uow, **(dependencies or {})}
         self.raise_on_error = raise_on_error
 
     async def handle(self, message: MessageType) -> List[Any]:
         results: List[Any] = []
         queue: Deque[MessageType] = deque([message])
-        
+
         while queue:
             msg = queue.popleft()
+
             if isinstance(msg, Event):
                 await self._handle_event(msg)
             elif isinstance(msg, Command):
-                result = self._handle_command(msg)
-                results.append(result)
+                res = await self._handle_command(msg)
+                results.append(res)
             else:
                 if self.raise_on_error:
                     raise TypeError(f"Unsupported message type: {type(msg)}")
-            for evt in self.uow.collect_new_events():
+
+            collected = self.uow.collect_new_events()
+            if inspect.isawaitable(collected):
+                events = await collected
+            else:
+                events = collected
+            for evt in events:
                 queue.append(evt)
 
-    async def _awaitable(self, func: Callable, **kwargs):
+        return results
+
+    async def _awaitable(self, func: Callable[..., Any], **kwargs):
         val = func(**kwargs)
         if inspect.isawaitable(val):
             return await val
         return val
 
-    async def _build_kwargs(self, func: Callable[..., Any], message: MessageType) -> Dict[str, Any]:
+    def _build_kwargs_for_message(self, func: Callable[..., Any], message: MessageType) -> Dict[str, Any]:
         sig = inspect.signature(func)
-        kwargs: Dict[str, Any] = {}
-        for name, param in sig.parameters.items():
-            if param.kind in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD):
+        params = list(sig.parameters.values())
+
+        msg_param = None
+        for p in params:
+            ann = p.annotation
+            if ann is not inspect._empty:
+                try:
+                    if issubclass(type(message), ann) or isinstance(message, ann):
+                        msg_param = p
+                        break
+                except TypeError:
+                    pass
+
+        if msg_param is None:
+            for candidate in ("event", "command", "message"):
+                p = sig.parameters.get(candidate)
+                if p is not None:
+                    msg_param = p
+                    break
+
+        if msg_param is None:
+            raise TypeError(
+                f"Handler {func.__name__} must have a parameter typed (or named) for {type(message).__name__}"
+            )
+
+        kwargs: Dict[str, Any] = {msg_param.name: message}
+
+        for p in params:
+            if p is msg_param or p.kind in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD):
                 continue
-            if name in self.dependencies:
-                kwargs[name] = self.dependencies.get(name)
+            if p.name in self.dependencies:
+                dep = self.dependencies[p.name]
+                kwargs[p.name] = dep() if callable(dep) and not inspect.isclass(dep) else dep
             else:
-                kwargs[name] = message
+                if p.default is inspect._empty:
+                    raise TypeError(f"Cannot resolve dependency '{p.name}' for handler {func.__name__}")
         return kwargs
 
     async def _handle_event(self, event: Event) -> None:
         for handler in self.event_handlers.get(type(event), []):
             try:
-                await self._awaitable(handler, **self._build_kwargs(handler, event))
+                kwargs = self._build_kwargs_for_message(handler, event)
+                await self._awaitable(handler, **kwargs)
             except Exception:
                 if self.raise_on_error:
                     raise
-                return None
 
-    async def _handle_command(self, command: Command) -> None:
+    async def _handle_command(self, command: Command) -> Any:
         handler = self.command_handlers.get(type(command))
-        if not handler:
+        if handler is None:
             if self.raise_on_error:
                 raise KeyError(f"No command handler registered for {type(command)}")
             return None
         try:
-            return await self._awaitable(handler, **self._build_kwargs(handler, command))
+            kwargs = self._build_kwargs_for_message(handler, command)
+            return await self._awaitable(handler, **kwargs)
         except Exception:
             if self.raise_on_error:
                 raise
