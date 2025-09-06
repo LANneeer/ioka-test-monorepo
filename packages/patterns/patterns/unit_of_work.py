@@ -4,7 +4,7 @@ from typing import Generator, Iterable, Tuple
 
 from .message import Event
 from .repository import AbstractRepository
-from patterns import repository
+from .observability import ObservabilityHook, NoopHook
 
 
 class AbstractUnitOfWork(AbstractContextManager["AbstractUnitOfWork"]):
@@ -38,7 +38,13 @@ class AbstractUnitOfWork(AbstractContextManager["AbstractUnitOfWork"]):
 
 class AsyncAbstractUnitOfWork(AbstractAsyncContextManager["AsyncAbstractUnitOfWork"]):
     repositories: Tuple[AbstractRepository, ...] = ()
-    
+
+    def __init__(self) -> None:
+        self._hook: ObservabilityHook = NoopHook()
+
+    def set_observability_hook(self, hook: ObservabilityHook) -> None:
+        self._hook = hook
+
     async def __aenter__(self) -> "AsyncAbstractUnitOfWork":
         return self
 
@@ -55,9 +61,11 @@ class AsyncAbstractUnitOfWork(AbstractAsyncContextManager["AsyncAbstractUnitOfWo
 
     async def commit(self) -> None:
         await self._commit()
+        await self._hook.on_uow_commit()
 
     async def rollback(self) -> None:
         await self._rollback()
+        await self._hook.on_uow_rollback()
     
     def collect_new_events(self) -> Generator[Event, None, None]:
         for repo in self.repositories:

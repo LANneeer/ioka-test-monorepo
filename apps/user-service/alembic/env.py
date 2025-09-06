@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import async_engine_from_config, AsyncEngine
 from alembic import context
 
 from src.infrastructure.users.orm import Base
-from src.config import DATABASE_URL
+from src.config import settings
 
 config = context.config
 if config.config_file_name is not None:
@@ -16,7 +16,7 @@ target_metadata = Base.metadata
 
 
 def get_url() -> str:
-    return DATABASE_URL
+    return settings.DATABASE_URL
 
 
 def run_migrations_offline() -> None:

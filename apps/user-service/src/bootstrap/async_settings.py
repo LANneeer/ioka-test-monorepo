@@ -2,6 +2,7 @@ from typing import Mapping, Sequence, Type
 from patterns.message import Command, Event
 from patterns.message_bus import AsyncMessageBus
 from patterns.unit_of_work import AsyncAbstractUnitOfWork
+from patterns.observability import ObservabilityHook
 from src.dto.commands import RegisterUser, UpdateUserProfile, ChangeUserPassword, ActivateUser, DeactivateUser, PromoteToAdmin
 from src.gateway.handlers.async_user import (
     handle_register_user, handle_update_user_profile, handle_change_user_password,
@@ -10,7 +11,7 @@ from src.gateway.handlers.async_user import (
 )
 from src.dto.commands import UserRegistered
 
-def bootstrap_async(uow: AsyncAbstractUnitOfWork, **deps) -> AsyncMessageBus:
+def bootstrap_async(uow: AsyncAbstractUnitOfWork, hook: ObservabilityHook | None = None, **deps) -> AsyncMessageBus:
     event_handlers: Mapping[Type[Event], Sequence] = {
         UserRegistered: [on_user_registered],
     }
@@ -28,4 +29,5 @@ def bootstrap_async(uow: AsyncAbstractUnitOfWork, **deps) -> AsyncMessageBus:
         command_handlers=command_handlers,
         dependencies=deps,
         raise_on_error=True,
+        hook=hook
     )

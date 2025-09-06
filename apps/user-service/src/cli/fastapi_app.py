@@ -1,13 +1,16 @@
 import hashlib
 from typing import Annotated
 from uuid import UUID
-from fastapi import FastAPI, Depends, HTTPException, status, Query
+from fastapi import FastAPI, Depends, HTTPException, status, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from src.gateway.schemas.users import UserCreateDTO, UserReadDTO, UserUpdateDTO, PasswordChangeDTO
 from src.dto.commands import RegisterUser, UpdateUserProfile, ChangeUserPassword, ActivateUser, DeactivateUser, PromoteToAdmin
 from src.bootstrap.async_settings import bootstrap_async
 from src.infrastructure.async_unit_of_work import AsyncUnitOfWork
+from src.infrastructure.hooks import PromAuditHook
+from src.infrastructure.middleware import IdempotencyMiddleware, MetricsMiddleware, prom_endpoint
 from src.cli.error import install_exception_handlers
+from src.config import settings
 
 app = FastAPI(title="User Service (async)")
 
@@ -15,6 +18,9 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"],
 )
+app.add_middleware(IdempotencyMiddleware)
+if settings.PROM_ENABLED:
+    app.add_middleware(MetricsMiddleware)
 install_exception_handlers(app)
 
 async def get_uow():
@@ -23,6 +29,12 @@ async def get_uow():
 
 def hash_password(p: str) -> str:
     return hashlib.sha256(p.encode()).hexdigest()
+
+
+@app.get("/metrics")
+def metrics():
+    data, content_type = prom_endpoint()
+    return Response(content=data, media_type=content_type)
 
 
 @app.get("/users", response_model=list[UserReadDTO])
@@ -45,7 +57,8 @@ async def register_user(
     dto: UserCreateDTO,
     uow: Annotated[AsyncUnitOfWork, Depends(get_uow)],
 ):
-    bus = bootstrap_async(uow)
+    hook = PromAuditHook()
+    bus = bootstrap_async(uow, hook=hook) 
     results = await bus.handle(RegisterUser(
         email=dto.email, username=dto.username,
         password_hash=hash_password(dto.password), locale=dto.locale
@@ -78,7 +91,8 @@ async def update_user(
     dto: UserUpdateDTO,
     uow: Annotated[AsyncUnitOfWork, Depends(get_uow)],
 ):
-    bus = bootstrap_async(uow)
+    hook = PromAuditHook()
+    bus = bootstrap_async(uow, hook=hook) 
     await bus.handle(UpdateUserProfile(user_id=user_id, new_username=dto.username, new_locale=dto.locale))
     user = await uow.users.get_async(user_id)
     if not user:
@@ -94,7 +108,8 @@ async def change_password(
     dto: PasswordChangeDTO,
     uow: Annotated[AsyncUnitOfWork, Depends(get_uow)],
 ):
-    bus = bootstrap_async(uow)
+    hook = PromAuditHook()
+    bus = bootstrap_async(uow, hook=hook) 
     await bus.handle(ChangeUserPassword(user_id=user_id, new_password_hash=hash_password(dto.password)))
     return None
 
@@ -103,7 +118,8 @@ async def activate_user(
     user_id: UUID,
     uow: Annotated[AsyncUnitOfWork, Depends(get_uow)],
 ):
-    bus = bootstrap_async(uow)
+    hook = PromAuditHook()
+    bus = bootstrap_async(uow, hook=hook) 
     await bus.handle(ActivateUser(user_id=user_id))
     return None
 
@@ -112,7 +128,8 @@ async def deactivate_user(
     user_id: UUID,
     uow: Annotated[AsyncUnitOfWork, Depends(get_uow)],
 ):
-    bus = bootstrap_async(uow)
+    hook = PromAuditHook()
+    bus = bootstrap_async(uow, hook=hook) 
     await bus.handle(DeactivateUser(user_id=user_id))
     return None
 
@@ -121,6 +138,7 @@ async def promote_user(
     user_id: UUID,
     uow: Annotated[AsyncUnitOfWork, Depends(get_uow)],
 ):
-    bus = bootstrap_async(uow)
+    hook = PromAuditHook()
+    bus = bootstrap_async(uow, hook=hook) 
     await bus.handle(PromoteToAdmin(user_id=user_id))
     return None

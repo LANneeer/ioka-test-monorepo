@@ -4,7 +4,7 @@ from typing import Any, Callable, Deque, Dict, Iterable, List, Mapping, MutableM
 
 from .message import MessageType, Command, Event
 from .unit_of_work import AbstractUnitOfWork, AsyncAbstractUnitOfWork
-
+from .observability import ObservabilityHook, NoopHook
 
 EventHandler = Callable[..., Any]
 CommandHandler = Callable[..., Any]
@@ -97,7 +97,8 @@ class AsyncMessageBus:
         event_handlers: Mapping[Type[Event], Sequence[EventHandler]] | None = None,
         command_handlers: Mapping[Type[Command], CommandHandler] | None = None,
         dependencies: Mapping[str, Any] | None = None,
-        raise_on_error: bool = False
+        raise_on_error: bool = False,
+        hook: ObservabilityHook | None = None,
     ) -> None:
         self.uow = uow
         self.event_handlers: Dict[Type[Event], List[EventHandler]] = {
@@ -108,6 +109,7 @@ class AsyncMessageBus:
         }
         self.dependencies: Dict[str, Any] = {"uow": self.uow, **(dependencies or {})}
         self.raise_on_error = raise_on_error
+        self.hook: ObservabilityHook = hook or NoopHook()
 
     async def handle(self, message: MessageType) -> List[Any]:
         results: List[Any] = []
@@ -182,24 +184,33 @@ class AsyncMessageBus:
         return kwargs
 
     async def _handle_event(self, event: Event) -> None:
+        await self.hook.on_event_start(event)
         for handler in self.event_handlers.get(type(event), []):
             try:
                 kwargs = self._build_kwargs_for_message(handler, event)
                 await self._awaitable(handler, **kwargs)
-            except Exception:
+                await self.hook.on_event_end(event)
+            except Exception as e:
+                await self.hook.on_event_error(event, e)
                 if self.raise_on_error:
                     raise
 
     async def _handle_command(self, command: Command) -> Any:
+        await self.hook.on_command_start(command)
         handler = self.command_handlers.get(type(command))
         if handler is None:
+            err = KeyError(f"No command handler registered for {type(command)}")
+            await self.hook.on_command_error(command, err)
             if self.raise_on_error:
-                raise KeyError(f"No command handler registered for {type(command)}")
+                raise err
             return None
         try:
             kwargs = self._build_kwargs_for_message(handler, command)
-            return await self._awaitable(handler, **kwargs)
-        except Exception:
+            res = await self._awaitable(handler, **kwargs)
+            await self.hook.on_command_end(command, res)
+            return res
+        except Exception as e:
+            await self.hook.on_command_error(command, e)
             if self.raise_on_error:
                 raise
             return None

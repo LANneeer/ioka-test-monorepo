@@ -56,4 +56,4 @@ ENV PATH="/app/apps/user-service/.venv/bin:$PATH"
 EXPOSE 8001
 HEALTHCHECK --interval=30s --timeout=3s --retries=3 CMD curl -fsS http://localhost:8001/docs >/dev/null || exit 1
 
-CMD ["uvicorn", "src.cli.fastapi_app:app", "--host", "0.0.0.0", "--port", "8001"]
+CMD sh -c 'alembic upgrade head && uvicorn src.cli.fastapi_app:app --host 0.0.0.0 --port 8001'
