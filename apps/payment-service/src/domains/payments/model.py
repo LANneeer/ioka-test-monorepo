@@ -144,26 +144,30 @@ class Payment(AbstractAggregate):
         return cls(**state)
 
     def mark_processing(self) -> None:
-        self._transition(Status.PROCESSING)
+        self.transition = Status.PROCESSING
+        self._touch()
 
     def complete(self) -> None:
-        self._transition(Status.COMPLETED)
+        self.transition = Status.COMPLETED
+        self._touch()
 
     def fail(self) -> None:
-        self._transition(Status.FAILED)
+        self.transition(Status.FAILED)
+        self._touch()
 
     def refund(self, *, original_payment_id: UUID) -> None:
         if self._status != Status.COMPLETED:
             raise ValueError("Only completed payments can be refunded")
         self._is_reversal = True
-        self._transition(Status.REFUNDED)
+        self.transition(Status.REFUNDED)
         self._record_event(PaymentRefunded(payment_id=self.id, original_payment_id=original_payment_id))
 
-    def _transition(self, new_status: Status) -> None:
+    def transition(self, new_status: Status) -> None:
         if self._status == new_status:
             return
         old = self._status
         self._status = new_status
-        self._updated_at = datetime.now(timezone.utc)
-        self._record_event(PaymentStatusChanged(payment_id=self.id, old_status=old.value, new_status=new_status.value))
+        self._touch()
 
+    def _touch(self) -> None:
+        self._updated_at = datetime.now(timezone.utc)

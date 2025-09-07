@@ -20,6 +20,16 @@ class SqlAlchemyAsyncPaymentRepository(AbstractRepository[Payment]):
     def _get(self, reference: UUID) -> Optional[Payment]:
         raise NotImplementedError("Use async get_async")
 
+    async def save(self, aggregate: Payment, *, commit: bool = False, refresh: bool = True) -> Payment:
+        orm = self._to_orm(aggregate)
+        self.session.add(orm)
+        await self.session.flush()
+        if commit:
+            await self.session.commit()
+        if refresh:
+            await self.session.refresh(orm)
+        return self._to_domain(orm)
+
     async def get_async(self, payment_id: UUID) -> Optional[Payment]:
         row = await self.session.get(PaymentORM, payment_id)
         return self._to_domain(row) if row else None

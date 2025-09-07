@@ -88,7 +88,21 @@ async def create_payment(
 async def get_payment(payment_id: UUID, uow: Annotated[AsyncUnitOfWork, Depends(get_uow)]):
     p = await uow.payments.get_async(payment_id)
     if not p: raise HTTPException(404, "Payment not found")
-    return PaymentReadDTO(id=p.id, payer_id=p.payer_id, payee_id=p.payee_id, amount=str(p.amount), currency=p.currency, description=p.description, status=p.status.value, is_reversal=p.is_reversal)
+    return PaymentReadDTO(
+            id=p.id,
+            payer_id=p.payer_id,
+            payee_id=p.payee_id,
+            src_amount=str(p.src_amount),
+            src_currency=p.src_currency,
+            dst_amount=str(p.dst_amount),
+            dst_currency=p.dst_currency,
+            fx_rate=str(p.fx_rate),
+            fx_provider=p.fx_provider,
+            fx_at=p.fx_at.isoformat(),
+            status=p.status.value,
+            is_reversal=p.is_reversal,
+        )
+
 
 @app.get("/payments", response_model=list[PaymentReadDTO])
 async def list_payments(
