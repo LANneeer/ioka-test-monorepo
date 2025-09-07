@@ -1,10 +1,10 @@
-import logging
 import time
 from prometheus_client import Counter, Histogram
 from typing import Any
 from patterns.observability import ObservabilityHook
 from patterns.message import Command, Event
 from src.infrastructure.logging import audit_log, get_request_id
+from src.infrastructure.logging import logging
 
 log = logging.getLogger("obs")
 

@@ -24,6 +24,7 @@ def run_migrations_offline() -> None:
     context.configure(
         url=url,
         target_metadata=target_metadata,
+        version_table='alembic_version_users',
         literal_binds=True,
         compare_type=True,
         dialect_opts={"paramstyle": "named"},
@@ -35,6 +36,7 @@ def do_run_migrations(connection):
     context.configure(
         connection=connection,
         target_metadata=target_metadata,
+        version_table='alembic_version_users',
         compare_type=True,
         render_as_batch=False,  
     )

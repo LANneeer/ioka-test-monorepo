@@ -4,7 +4,7 @@ global:
 scrape_configs:
   - job_name: user-service
     static_configs:
-      - targets: ["user_service:8001"]
+      - targets: ["user-service:8001"]
         labels:
           service: "user-service"
     metrics_path: /metrics
