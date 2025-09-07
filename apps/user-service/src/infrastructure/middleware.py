@@ -1,7 +1,6 @@
 import asyncio
 import json
 import zlib
-import logging
 import time
 from dataclasses import dataclass
 from typing import Optional
@@ -10,9 +9,9 @@ from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_
 from starlette.middleware.base import BaseHTTPMiddleware
 from redis.asyncio import Redis
 from src.config import settings
-from src.infrastructure.logging import get_request_id
+from src.infrastructure.logging import get_request_id, logging
 
-logger = logging.getLogger("idempotency")
+logger = logging.getLogger("cached")
 REQS = Counter("http_requests_total", "Total HTTP requests", ["method","path","status"])
 LAT  = Histogram("http_request_duration_seconds", "Latency", ["method","path","status"])
 
@@ -60,7 +59,7 @@ class IdempotencyMiddleware(BaseHTTPMiddleware):
         await self._ensure()
         key = make_key(request)
 
-        if request.method in ("POST", "PUT", "PATCH"):
+        if request.method in ("GET", "HEAD", "DELETE"):
             cached = await self.redis.get(key)
             if cached:
                 cr = CachedResponse.from_bytes(cached)
