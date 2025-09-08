@@ -12,7 +12,10 @@ from src.infrastructure.middleware import IdempotencyMiddleware, MetricsMiddlewa
 from src.cli.error import install_exception_handlers
 from src.config import settings
 
-app = FastAPI(title="User Service (async)")
+app = FastAPI(
+    title="User Service (async)",
+    servers=[{"url": "/api/users"}]
+)
 
 app.add_middleware(
     CORSMiddleware,

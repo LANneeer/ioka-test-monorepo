@@ -31,7 +31,10 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="Payment Service (async with FX)")
+app = FastAPI(
+    title="Payment Service (async with FX)",
+    servers=[{"url": "/api/payments"}],
+)
 
 app.add_middleware(IdempotencyMiddleware)
 if settings.PROM_ENABLED:

@@ -3,7 +3,6 @@ version: "3.9"
 volumes:
   postgres_data: {}
 
-
 x-conf-environment: &conf-environment
   APP_NAME: "${APP_NAME}"
   DEV: "${DEV}"
@@ -35,8 +34,20 @@ x-conf-environment: &conf-environment
 
   TRACING_ENABLED: "${TRACING_ENABLED}"
 
-
 services:
+  nginx:
+    image: nginx:1.27-alpine
+    depends_on:
+      - user-service
+      - payment-service
+      - kibana
+      - grafana
+      - prometheus
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/dev.conf:/etc/nginx/conf.d/default.conf:ro
+
   user-service:
     build:
       context: .
@@ -46,7 +57,7 @@ services:
       - "8001:8001"
     volumes:
       - ./apps/user-service/src:/app/apps/user-service/src:ro
-  
+
   payment-service:
     build:
       context: .
@@ -60,8 +71,6 @@ services:
   postgres:
     image: postgres:12
     container_name: db
-    volumes:
-      - postgres_data:/var/lib/postgresql/data/
     environment:
       POSTGRES_DB: "$POSTGRES_DB"
       POSTGRES_PASSWORD: "$POSTGRES_PASSWORD"
@@ -69,8 +78,13 @@ services:
       PGDATA: "$PGDATA"
     ports:
       - "5432:5432"
-    expose:
-      - "5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data/
+    expose: ["5432"]
+
+  redis:
+    image: redis:7-alpine
+    ports: ["6379:6379"]
 
   logstash:
     image: docker.elastic.co/logstash/logstash:8.13.4
@@ -81,6 +95,7 @@ services:
       - LS_JAVA_OPTS=-Xms256m -Xmx256m
     volumes:
       - ./observability/logstash/pipeline:/usr/share/logstash/pipeline:ro
+
   elasticsearch:
     image: docker.elastic.co/elasticsearch/elasticsearch:8.13.4
     environment:
@@ -88,30 +103,32 @@ services:
       - xpack.security.enabled=false
       - ES_JAVA_OPTS=-Xms1g -Xmx1g
     ports: ["9200:9200"]
+
   kibana:
     image: docker.elastic.co/kibana/kibana:8.13.4
     environment:
       - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+      - SERVER_BASEPATH=/kibana
+      - SERVER_REWRITEBASEPATH=true
     ports: ["5601:5601"]
     depends_on: [elasticsearch]
 
-
   prometheus:
     image: prom/prometheus:v2.54.1
-    command: ["--config.file=/etc/prometheus/prometheus.yaml"]
+    command:
+      - --config.file=/etc/prometheus/prometheus.yaml
+      - --web.external-url=http://localhost/prometheus
+      - --web.route-prefix=/prometheus
     volumes:
-      - ./observability/prometheus/prometheus.yaml:/etc/prometheus/prometheus.yaml
+      - ./observability/prometheus/prometheus.yaml:/etc/prometheus/prometheus.yaml:ro
     ports: ["9090:9090"]
 
   grafana:
     image: grafana/grafana:11.1.0
     environment:
       - GF_SECURITY_ADMIN_PASSWORD=admin
-    ports: ["3000:3000"]
+      - GF_SERVER_ROOT_URL=%(protocol)s://%(domain)s/grafana
+      - GF_SERVER_SERVE_FROM_SUB_PATH=true
     volumes:
-      - ./observability/grafana/provisioning:/etc/grafana/provisioning
-
-  redis:
-    image: redis:7-alpine
-    ports: ["6379:6379"]
-
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+    ports: ["3000:3000"]
