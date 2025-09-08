@@ -8,6 +8,9 @@ from patterns.aggregator import AbstractAggregate
 from patterns.message import Event
 
 from src.dto.commands import (
+    CompletePayment,
+    FailPayment,
+    MarkProcessing,
     PaymentCreated,
     PaymentRefunded,
     PaymentStatusChanged
@@ -144,16 +147,19 @@ class Payment(AbstractAggregate):
         return cls(**state)
 
     def mark_processing(self) -> None:
-        self.transition = Status.PROCESSING
+        self.transition(Status.PROCESSING)
         self._touch()
+        self._record_event(MarkProcessing(payment_id=self.id))
 
     def complete(self) -> None:
-        self.transition = Status.COMPLETED
+        self.transition(Status.COMPLETED)
         self._touch()
+        self._record_event(CompletePayment(payment_id=self.id))
 
     def fail(self) -> None:
         self.transition(Status.FAILED)
         self._touch()
+        self._record_event(FailPayment(payment_id=self.id))
 
     def refund(self, *, original_payment_id: UUID) -> None:
         if self._status != Status.COMPLETED:
@@ -165,7 +171,6 @@ class Payment(AbstractAggregate):
     def transition(self, new_status: Status) -> None:
         if self._status == new_status:
             return
-        old = self._status
         self._status = new_status
         self._touch()
 

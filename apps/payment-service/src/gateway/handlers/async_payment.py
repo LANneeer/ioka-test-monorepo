@@ -1,9 +1,9 @@
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from uuid import UUID
 
 from patterns.unit_of_work import AsyncAbstractUnitOfWork
 
-from src.domains.payments.model import Payment
+from src.domains.payments.model import Payment, Status
 from src.dto.commands import (
     CreatePayment,
     MarkProcessing,
@@ -19,6 +19,7 @@ from src.domains.payments.abstraction import (
     IFxClient,
     INotifier,
 )
+from src.domains.common.exceptions import Conflict, NotFound, DatabaseConflict
 
 
 async def handle_create_payment(
@@ -29,9 +30,9 @@ async def handle_create_payment(
     notifier: INotifier | None = None,
 ) -> UUID:
     if not await users.user_exists(cmd.payer_id):
-        raise ValueError("Payer not found")
+        raise NotFound("Payer not found")
     if not await users.user_exists(cmd.payee_id):
-        raise ValueError("Payee not found")
+        raise NotFound("Payee not found")
 
     src_amount = Decimal(cmd.src_amount)
     quote = await fx.convert(base=cmd.src_currency, quote=cmd.dst_currency, amount=src_amount)
@@ -49,7 +50,7 @@ async def handle_create_payment(
         description=cmd.description,
     )
 
-    uow.payments.add(payment)
+    await uow.payments.add(payment)
     await uow.commit()
 
     if notifier:
@@ -67,18 +68,18 @@ async def handle_create_payment(
 async def handle_mark_processing(cmd: MarkProcessing, uow: AsyncAbstractUnitOfWork) -> None:
     p = await uow.payments.get_async(cmd.payment_id)
     if not p:
-        raise ValueError("Payment not found")
+        raise NotFound("Payment not found")
     p.mark_processing()
-    uow.payments.save(p)
+    await uow.payments.save(p)
     await uow.commit()
 
 
 async def handle_complete(cmd: CompletePayment, uow: AsyncAbstractUnitOfWork, notifier: INotifier | None = None) -> None:
     p = await uow.payments.get_async(cmd.payment_id)
     if not p:
-        raise ValueError("Payment not found")
+        raise NotFound("Payment not found")
     p.complete()
-    uow.payments.save(p)
+    await uow.payments.save(p)
     await uow.commit()
     if notifier:
         await notifier.transaction_status(
@@ -93,9 +94,9 @@ async def handle_complete(cmd: CompletePayment, uow: AsyncAbstractUnitOfWork, no
 async def handle_fail(cmd: FailPayment, uow: AsyncAbstractUnitOfWork, notifier: INotifier | None = None) -> None:
     p = await uow.payments.get_async(cmd.payment_id)
     if not p:
-        raise ValueError("Payment not found")
+        raise NotFound("Payment not found")
     p.fail()
-    uow.payments.save(p)
+    await uow.payments.save(p)
     await uow.commit()
     if notifier:
         await notifier.transaction_status(
@@ -110,9 +111,9 @@ async def handle_fail(cmd: FailPayment, uow: AsyncAbstractUnitOfWork, notifier: 
 async def handle_refund(cmd: RefundPayment, uow: AsyncAbstractUnitOfWork, notifier: INotifier | None = None) -> None:
     p = await uow.payments.get_async(cmd.payment_id)
     if not p:
-        raise ValueError("Payment not found")
+        raise NotFound("Payment not found")
     p.refund(original_payment_id=cmd.original_payment_id)
-    uow.payments.save(p)
+    await uow.payments.save(p)
     await uow.commit()
     if notifier:
         await notifier.transaction_status(
@@ -132,15 +133,15 @@ async def on_payment_status_changed(evt: PaymentStatusChanged, uow: AsyncAbstrac
     try:
         new_status = Status(evt.new_status)
     except ValueError:
-        raise ValueError("Status not found")
+        raise NotFound("Status not found")
     p.trasition(new_status)
-    uow.payments.add(p)
+    await uow.payments.save(p)
     await uow.commit()
 
 async def on_payment_refunded(evt: PaymentRefunded, uow: AsyncAbstractUnitOfWork) -> None:
     original = await uow.payments.get_async(evt.payment_id)
     if not original:
-        raise ValueError("Payment not found")
+        raise NotFound("Payment not found")
     try:
         inv_rate = (Decimal("1") / original.fx_rate).quantize(Decimal("0.00000001"), rounding=ROUND_HALF_UP)
     except (InvalidOperation, ZeroDivisionError):
@@ -166,6 +167,6 @@ async def on_payment_refunded(evt: PaymentRefunded, uow: AsyncAbstractUnitOfWork
     original._status = Status.REFUNDED
     original._updated_at = datetime.now(timezone.utc)
 
-    uow.payments.save(reversal)
-    uow.payments.save(original)
+    await uow.payments.save(reversal)
+    await uow.payments.save(original)
     await uow.commit()

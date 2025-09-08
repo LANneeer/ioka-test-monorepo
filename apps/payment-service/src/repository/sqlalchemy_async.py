@@ -20,15 +20,44 @@ class SqlAlchemyAsyncPaymentRepository(AbstractRepository[Payment]):
     def _get(self, reference: UUID) -> Optional[Payment]:
         raise NotImplementedError("Use async get_async")
 
-    async def save(self, aggregate: Payment, *, commit: bool = False, refresh: bool = True) -> Payment:
-        orm = self._to_orm(aggregate)
-        self.session.add(orm)
-        await self.session.flush()
-        if commit:
-            await self.session.commit()
-        if refresh:
-            await self.session.refresh(orm)
-        return self._to_domain(orm)
+    async def save(self, aggregate: Payment) -> Payment:
+        now = datetime.now(timezone.utc)
+        orm_obj: Optional[PaymentORM] = await self.session.get(PaymentORM, aggregate.id)
+        if orm_obj is None:
+            orm_obj = PaymentORM(
+                id=aggregate.id,
+                payer_id=aggregate.payer_id,
+                payee_id=aggregate.payee_id,
+                src_amount=aggregate.src_amount,
+                src_currency=aggregate.src_currency,
+                dst_amount=aggregate.dst_amount,
+                dst_currency=aggregate.dst_currency,
+                fx_rate=aggregate.fx_rate,
+                fx_provider=aggregate.fx_provider,
+                fx_at=aggregate.fx_at,
+                description=aggregate.description,
+                status=(aggregate.status.value if hasattr(aggregate.status, "value") else aggregate.status),
+                is_reversal=aggregate.is_reversal,
+                created_at=aggregate.created_at or now,
+                updated_at=now,
+            )
+            self.session.add(orm_obj)
+        else:
+            orm_obj.payer_id = aggregate.payer_id
+            orm_obj.payee_id = aggregate.payee_id
+            orm_obj.src_amount = aggregate.src_amount
+            orm_obj.src_currency = aggregate.src_currency
+            orm_obj.dst_amount = aggregate.dst_amount
+            orm_obj.dst_currency = aggregate.dst_currency
+            orm_obj.fx_rate = aggregate.fx_rate
+            orm_obj.fx_provider = aggregate.fx_provider
+            orm_obj.fx_at = aggregate.fx_at
+            orm_obj.description = aggregate.description
+            orm_obj.status = (aggregate.status.value if hasattr(aggregate.status, "value") else aggregate.status)
+            orm_obj.is_reversal = aggregate.is_reversal
+            orm_obj.updated_at = now
+
+        return self._to_domain(orm_obj)
 
     async def get_async(self, payment_id: UUID) -> Optional[Payment]:
         row = await self.session.get(PaymentORM, payment_id)
